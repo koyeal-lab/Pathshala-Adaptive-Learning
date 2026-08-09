@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-chalk-bg text-chalk-slate font-body antialiased;
+    background-image: radial-gradient(circle at 1px 1px, #00000008 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+  h1, h2, h3 {
+    @apply font-display;
+  }
+  :focus-visible {
+    outline: 3px solid #C9A24B;
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .chalk-underline {
+    background-image: linear-gradient(transparent 65%, #C9A24B55 65%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
