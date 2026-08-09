@@ -9,7 +9,7 @@ import {
 } from "./db";
 import { selectNextQuestion, updateAbility, probabilityCorrect } from "./adaptiveEngine";
 
-export const API_BASE = "http://localhost:4000/api";
+export const API_BASE = "https://pathshala-adaptive-learning.onrender.com/api";
 
 async function tryFetch(url, options) {
   try {
