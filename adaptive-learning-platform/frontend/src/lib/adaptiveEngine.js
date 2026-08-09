@@ -17,10 +17,19 @@ export function updateAbility(theta, difficulty, wasCorrect) {
 }
 
 export function selectNextQuestion(theta, questionBank, askedIds = new Set()) {
-  const candidates = questionBank.filter((q) => !askedIds.has(q.id));
+  // Ensure askedIds is handled safely even if passed as an array or null
+  const askedSet = askedIds instanceof Set ? askedIds : new Set(askedIds || []);
+
+  // Filter candidates matching both string and number representations of q.id
+  const candidates = questionBank.filter(
+    (q) => !askedSet.has(q.id) && !askedSet.has(String(q.id)) && !askedSet.has(Number(q.id))
+  );
+
   if (candidates.length === 0) return null;
+
   let best = null;
   let bestScore = Infinity;
+
   for (const q of candidates) {
     const p = probabilityCorrect(theta, q.difficulty);
     const score = Math.abs(p - TARGET_SUCCESS_PROB);
@@ -29,6 +38,7 @@ export function selectNextQuestion(theta, questionBank, askedIds = new Set()) {
       best = q;
     }
   }
+
   return best;
 }
 

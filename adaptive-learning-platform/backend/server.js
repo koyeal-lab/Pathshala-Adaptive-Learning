@@ -19,18 +19,26 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "5mb" })); // 5mb to accept batched offline-sync payloads
 
-// ---------- "Database" (lowdb -> db.json, zero external DB needed = near-zero cost) ----------
-const dbFile = path.join(__dirname, "data", "db.json");
+// ---------- "Database" setup ----------
+const dataDir = path.join(__dirname, "data");
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const dbFile = path.join(dataDir, "db.json");
 if (!fs.existsSync(dbFile)) {
   fs.writeFileSync(dbFile, JSON.stringify({ students: {}, attempts: [] }, null, 2));
 }
+
 const adapter = new JSONFile(dbFile);
 const db = new Low(adapter, { students: {}, attempts: [] });
-await db.read();
 
-const questionBank = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "data", "questions.json"), "utf-8")
-);
+// Safe JSON loader for question bank
+const questionsPath = path.join(__dirname, "data", "questions.json");
+let questionBank = [];
+if (fs.existsSync(questionsPath)) {
+  questionBank = JSON.parse(fs.readFileSync(questionsPath, "utf-8"));
+}
 
 function getOrCreateStudent(studentId, name) {
   if (!db.data.students[studentId]) {
@@ -57,12 +65,7 @@ app.post("/api/student/login", async (req, res) => {
   res.json(student);
 });
 
-// Full question bank, INCLUDING answer keys — the client caches this once in
-// IndexedDB so quizzes can be graded locally with zero connectivity. This is
-// a deliberate trade-off (a curious student could inspect IndexedDB and see
-// answers) accepted in exchange for true offline-first grading; the
-// per-question /api/quiz/next endpoint above still strips the answer for the
-// normal online flow.
+// Full question bank
 app.get("/api/quiz/bank", (req, res) => {
   res.json(questionBank);
 });
@@ -134,17 +137,16 @@ app.post("/api/quiz/answer", async (req, res) => {
   });
 });
 
-// Offline sync: client (PWA) batches attempts made while offline and posts them here
-// once connectivity returns. Idempotent-ish: skips attempts with ids already recorded.
+// Offline sync
 app.post("/api/sync/attempts", async (req, res) => {
-  const { attempts } = req.body; // array of locally-queued attempt objects
+  const { attempts } = req.body;
   if (!Array.isArray(attempts)) return res.status(400).json({ error: "attempts[] required" });
 
   const existingIds = new Set(db.data.attempts.map((a) => a.id));
   let synced = 0;
 
   for (const local of attempts) {
-    if (existingIds.has(local.id)) continue; // already synced
+    if (existingIds.has(local.id)) continue;
     const student = getOrCreateStudent(local.studentId);
     const question = questionBank.find((q) => q.id === local.questionId);
     if (!question) continue;
@@ -171,9 +173,7 @@ app.post("/api/sync/attempts", async (req, res) => {
   res.json({ synced, total: attempts.length });
 });
 
-// ---------- Teacher Dashboard ----------
-
-// Class-wide analytics: mastery distribution, struggling students, topic weak-spots
+// Teacher Dashboard
 app.get("/api/teacher/dashboard", async (req, res) => {
   const students = Object.values(db.data.students);
   const attempts = db.data.attempts;
@@ -201,7 +201,6 @@ app.get("/api/teacher/dashboard", async (req, res) => {
     };
   });
 
-  // Topic-level weak spots across the whole class
   const topicStats = {};
   for (const a of attempts) {
     if (!topicStats[a.topic]) topicStats[a.topic] = { total: 0, correct: 0 };
@@ -224,5 +223,11 @@ app.get("/api/teacher/dashboard", async (req, res) => {
   });
 });
 
+// Initialize LowDB safely before starting server listener
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`✅ Adaptive Learning API running on http://localhost:${PORT}`));
+async function startServer() {
+  await db.read();
+  app.listen(PORT, () => console.log(`✅ Adaptive Learning API running on port ${PORT}`));
+}
+
+startServer();

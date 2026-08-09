@@ -15,7 +15,7 @@ async function tryFetch(url, options) {
   try {
     const res = await fetch(url, {
       ...options,
-      signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
+      signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();

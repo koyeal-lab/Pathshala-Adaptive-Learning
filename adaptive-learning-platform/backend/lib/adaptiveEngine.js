@@ -1,55 +1,49 @@
-/**
- * Adaptive Difficulty Engine
- * ---------------------------------
- * A lightweight Elo/IRT-inspired algorithm that adjusts question difficulty
- * to each student's estimated ability in real time — no heavy ML infra needed,
- * which matters for low-resource government-school deployments.
- *
- * Concept (simplified Item Response Theory):
- *   - Each student has an "ability" score (theta), starts at 0.
- *   - Each question has a "difficulty" score (b), from -3 (easiest) to +3 (hardest).
- *   - P(correct) = 1 / (1 + e^-(theta - b))   [logistic model]
- *   - After each answer, we nudge theta up/down (like Elo rating updates).
- *   - Next question is chosen to have P(correct) close to ~0.65-0.75
- *     (the "desirable difficulty" zone — hard enough to challenge, not so hard
- *     that the student disengages).
- */
-
-const K_FACTOR = 0.4; // learning rate for ability updates
+// Target probability for adaptive question selection (70% target success rate)
 const TARGET_SUCCESS_PROB = 0.7;
+const K_FACTOR = 0.4;
 
+/**
+ * Calculate probability of correct answer based on student ability (theta) and difficulty
+ */
 export function probabilityCorrect(theta, difficulty) {
   return 1 / (1 + Math.exp(-(theta - difficulty)));
 }
 
 /**
- * Update a student's ability estimate after answering a question.
- * @param {number} theta - current ability estimate
- * @param {number} difficulty - difficulty of the question just answered
- * @param {boolean} wasCorrect
- * @returns {number} new theta
+ * Update student ability (theta) after an answer attempt
  */
-export function updateAbility(theta, difficulty, wasCorrect) {
+export function updateTheta(theta, difficulty, wasCorrect) {
   const expected = probabilityCorrect(theta, difficulty);
   const actual = wasCorrect ? 1 : 0;
   const newTheta = theta + K_FACTOR * (actual - expected);
-  // clamp to a reasonable range
   return Math.max(-4, Math.min(4, newTheta));
 }
+
+// Export updateAbility alias so server.js can import it under either name
+export const updateAbility = (theta, wasCorrect, difficulty) => {
+  // Handles both parameter order conventions cleanly
+  if (typeof wasCorrect === 'boolean') {
+    return updateTheta(theta, difficulty, wasCorrect);
+  }
+  return updateTheta(theta, wasCorrect, difficulty);
+};
 
 /**
  * Pick the next best question from a bank for a given ability level.
  * Chooses the question whose difficulty makes P(correct) closest to target.
- * @param {number} theta
- * @param {Array} questionBank - [{id, difficulty, topic, ...}]
- * @param {Set<string>} askedIds - ids already asked this session
  */
-export function selectNextQuestion(theta, questionBank, askedIds = new Set()) {
-  const candidates = questionBank.filter((q) => !askedIds.has(q.id));
+export function selectNextQuestion(theta, questionBank = [], askedIds = new Set()) {
+  const askedSet = askedIds instanceof Set ? askedIds : new Set(askedIds || []);
+
+  const candidates = questionBank.filter(
+    (q) => !askedSet.has(q.id) && !askedSet.has(String(q.id)) && !askedSet.has(Number(q.id))
+  );
+
   if (candidates.length === 0) return null;
 
   let best = null;
   let bestScore = Infinity;
+
   for (const q of candidates) {
     const p = probabilityCorrect(theta, q.difficulty);
     const score = Math.abs(p - TARGET_SUCCESS_PROB);
@@ -58,12 +52,17 @@ export function selectNextQuestion(theta, questionBank, askedIds = new Set()) {
       best = q;
     }
   }
+
+  // Fallback: If score calculation yields no best match, return the first available candidate
+  if (!best && candidates.length > 0) {
+    best = candidates[0];
+  }
+
   return best;
 }
 
 /**
- * Classify a student's mastery level from ability score — used by the
- * teacher dashboard to flag struggling students early.
+ * Categorize student mastery level based on theta
  */
 export function masteryLevel(theta) {
   if (theta < -1.5) return "at-risk";
@@ -73,12 +72,10 @@ export function masteryLevel(theta) {
 }
 
 /**
- * Detect a "struggling" pattern: repeated wrong answers or negative theta
- * trend over the last N attempts — used for the early-warning dashboard.
+ * Detect if a student is struggling based on recent attempt patterns
  */
-export function detectStrugglePattern(attemptsHistory) {
-  if (attemptsHistory.length < 3) return false;
-  const last5 = attemptsHistory.slice(-5);
-  const wrongCount = last5.filter((a) => !a.wasCorrect).length;
-  return wrongCount / last5.length >= 0.6; // 60%+ wrong recently
+export function detectStrugglePattern(attempts = []) {
+  if (attempts.length < 3) return false;
+  const recent = attempts.slice(-3);
+  return recent.every((a) => a.isCorrect === false);
 }
